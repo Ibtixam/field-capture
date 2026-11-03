@@ -1,10 +1,3 @@
-// Minimal sync backend for the prototype. Zero dependencies: `node server/index.mjs`
-//
-// PUT /captures/:id   idempotent upsert keyed by the client UUID
-// GET /captures       list what the server has (handy for the demo)
-//
-// FAIL_RATE=0.3 node server/index.mjs   -> randomly return 503 to exercise retries
-
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
 

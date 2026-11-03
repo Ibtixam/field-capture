@@ -1,11 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { CaptureRecord, Category, SyncStatus } from '../types';
 
-/**
- * Local-first store. SQLite is the source of truth: the UI reads from here and the
- * sync engine drains rows from here, so nothing is lost if the app is killed mid-sync.
- */
-
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 const SCHEMA_VERSION = 1;
@@ -91,7 +86,6 @@ export async function listCaptures(): Promise<CaptureRecord[]> {
   return rows.map(toRecord);
 }
 
-/** Oldest due record first, so the server receives captures in the order they were taken. */
 export async function nextDue(now: number): Promise<CaptureRecord | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Row>(
@@ -128,7 +122,6 @@ export async function markSynced(id: string, remoteId: string) {
   );
 }
 
-/** refundAttempt: the failure wasn't the server's fault (we went offline), so don't count it. */
 export async function markRetry(id: string, nextAttemptAt: number, error: string, refundAttempt = false) {
   const db = await getDb();
   await db.runAsync(
@@ -147,7 +140,6 @@ export async function markFailed(id: string, error: string) {
   );
 }
 
-/** Manual retry from the UI: back to the queue, fresh attempt budget, due now. */
 export async function requeue(id: string) {
   const db = await getDb();
   await db.runAsync(
@@ -157,19 +149,19 @@ export async function requeue(id: string) {
   );
 }
 
-/** On reconnect, don't make the user wait out a backoff that was computed while offline. */
 export async function makeAllPendingDue() {
   const db = await getDb();
   await db.runAsync(`UPDATE captures SET next_attempt_at = 0 WHERE status = 'pending'`);
 }
 
-/**
- * Crash recovery: a row left in 'syncing' means the app died mid-request.
- * Put it back in the queue. The server dedupes by id, so a resend is safe.
- */
 export async function recoverInterrupted() {
   const db = await getDb();
   await db.runAsync(`UPDATE captures SET status = 'pending', next_attempt_at = 0 WHERE status = 'syncing'`);
+}
+
+export async function deleteCapture(id: string) {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM captures WHERE id = ?', id);
 }
 
 export async function deleteAll() {

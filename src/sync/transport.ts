@@ -1,7 +1,6 @@
 import { File } from 'expo-file-system';
 import type { CaptureRecord } from '../types';
 
-/** Thrown by transports. `retryable` separates "try again later" from "this will never work". */
 export class SyncError extends Error {
   constructor(message: string, public readonly retryable: boolean) {
     super(message);
@@ -14,10 +13,6 @@ export interface Transport {
   push(record: CaptureRecord): Promise<{ remoteId: string }>;
 }
 
-/**
- * In-app fake backend so the prototype runs with zero setup.
- * Simulates latency, flaky 5xx responses, and server-side idempotency.
- */
 export class MockTransport implements Transport {
   readonly name = 'Mock server';
   failureRate = 0.3;
@@ -28,7 +23,6 @@ export class MockTransport implements Transport {
     if (Math.random() < this.failureRate) {
       throw new SyncError('503 Service Unavailable (simulated)', true);
     }
-    // Idempotent upsert: resending the same id returns the same remote id.
     let remoteId = this.seen.get(record.id);
     if (!remoteId) {
       remoteId = `srv_${this.seen.size + 1}`;
@@ -38,7 +32,6 @@ export class MockTransport implements Transport {
   }
 }
 
-/** Real HTTP transport. Enabled by setting EXPO_PUBLIC_SYNC_URL (see /server). */
 export class HttpTransport implements Transport {
   readonly name: string;
   constructor(private readonly baseUrl: string, private readonly timeoutMs = 15_000) {
@@ -64,7 +57,6 @@ export class HttpTransport implements Transport {
         signal: controller.signal,
       });
     } catch (e) {
-      // Network failure or timeout: always worth retrying.
       throw new SyncError(controller.signal.aborted ? 'Request timed out' : 'Network error', true);
     } finally {
       clearTimeout(timer);

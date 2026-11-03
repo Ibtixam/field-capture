@@ -31,7 +31,9 @@
           "cameraPermission": "Field Capture uses the camera to attach photos to site records.",
           "photosPermission": "Field Capture lets you attach photos from your library to site records."
         }
-      ]
+      ],
+      "@react-native-vector-icons/ionicons",
+      "expo-font"
     ]
   }
 }

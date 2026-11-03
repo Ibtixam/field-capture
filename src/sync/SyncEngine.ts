@@ -1,18 +1,15 @@
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { AppState } from 'react-native';
 import * as db from '../db/database';
-import { deleteAllPhotos } from '../media/photos';
+import { deleteAllPhotos, deletePhoto } from '../media/photos';
 import type { CaptureRecord } from '../types';
 import { decideAfterFailure } from './backoff';
 import { HttpTransport, MockTransport, SyncError, type Transport } from './transport';
 
 export interface EngineSnapshot {
   records: CaptureRecord[];
-  /** Device reports connectivity (NetInfo). */
   networkOnline: boolean;
-  /** Demo switch to simulate offline on a simulator where airplane mode isn't available. */
   forceOffline: boolean;
-  /** What the engine actually uses. */
   online: boolean;
   draining: boolean;
   lastDrainAt: number | null;
@@ -22,13 +19,6 @@ export interface EngineSnapshot {
 
 type Listener = () => void;
 
-/**
- * Drains the local queue to the server.
- *
- * - Single-flight: only one drain loop runs at a time, records go one by one, oldest first.
- * - Triggers: app start, new capture, reconnect, app foreground, scheduled backoff timer, manual.
- * - Every state change is written to SQLite before the UI is notified, so the UI is a view of disk.
- */
 class SyncEngine {
   private listeners = new Set<Listener>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -58,7 +48,6 @@ class SyncEngine {
     };
   }
 
-  // ---- store plumbing (consumed via useSyncExternalStore) ----
   subscribe = (l: Listener) => {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
@@ -74,7 +63,6 @@ class SyncEngine {
     this.set({ records: await db.listCaptures() });
   }
 
-  // ---- lifecycle ----
   async start() {
     if (this.started) return;
     this.started = true;
@@ -90,7 +78,6 @@ class SyncEngine {
   }
 
   private onNetInfo = (state: NetInfoState) => {
-    // isInternetReachable is null while unknown; only treat an explicit false as offline.
     const networkOnline = !!state.isConnected && state.isInternetReachable !== false;
     this.applyConnectivity(networkOnline, this.snapshot.forceOffline);
   };
@@ -99,14 +86,12 @@ class SyncEngine {
     const wasOnline = this.snapshot.online;
     this.set({ networkOnline, forceOffline });
     if (!wasOnline && this.snapshot.online) {
-      // Reconnected: flush immediately instead of waiting out offline-era backoff.
       await db.makeAllPendingDue();
       await this.refresh();
       void this.drain();
     }
   }
 
-  // ---- public actions ----
   async capture(rec: CaptureRecord) {
     await db.insertCapture(rec);
     await this.refresh();
@@ -135,13 +120,19 @@ class SyncEngine {
     this.set({ failureRate: v });
   }
 
+  async remove(id: string) {
+    const photoUri = this.snapshot.records.find((r) => r.id === id)?.photoUri;
+    await db.deleteCapture(id);
+    if (photoUri) deletePhoto(photoUri);
+    await this.refresh();
+  }
+
   async clearAll() {
     await db.deleteAll();
     deleteAllPhotos();
     await this.refresh();
   }
 
-  // ---- the drain loop ----
   private async drain() {
     if (this.snapshot.draining || !this.snapshot.online) return;
     this.clearRetryTimer();
@@ -167,7 +158,6 @@ class SyncEngine {
       await db.markSynced(rec.id, remoteId);
     } catch (e) {
       const err = e instanceof SyncError ? e : new SyncError(String(e), true);
-      // If we lost connectivity mid-request, don't burn an attempt on it.
       if (!this.snapshot.online) {
         await db.markRetry(rec.id, 0, 'Went offline during upload', true);
       } else {
